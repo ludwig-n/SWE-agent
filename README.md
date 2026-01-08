@@ -1,79 +1,184 @@
-<p align="center">
-  <a href="https://www.swe-agent.com/">
-    <img src="assets/swe-agent-banner.png" alt="swe-agent.com" />
-  </a>
-</p>
-
-
-<p align="center">
-  <a href="https://swe-agent.com"><strong>Website & Demo</strong></a>&nbsp; | &nbsp;
-  <a href="https://princeton-nlp.github.io/SWE-agent/"><strong>Documentation</strong></a>&nbsp; | &nbsp;
-  <a href="https://discord.gg/AVEFbBn2rH"><strong>Discord</strong></a>&nbsp; | &nbsp;
-  <a href="https://arxiv.org/abs/2405.15793"><strong>Preprint</strong></a>
-</p>
-
-**SWE-agent turns LMs (e.g. GPT-4) into software engineering agents that can resolve issues in real GitHub repositories.**
-
-On [SWE-bench](https://github.com/princeton-nlp/SWE-bench), SWE-agent resolves 12.47% of issues, achieving the state-of-the-art performance on the full test set.
-
-We accomplish our results by designing simple LM-centric commands and feedback formats to make it easier for the LM to browse the repository, view, edit and execute code files. We call this an **Agent-Computer Interface (ACI)**.
-Read more about it in our [paper](https://arxiv.org/abs/2405.15793)!
-
-SWE-agent is built and maintained by researchers from Princeton University.
-
-![My Movie 3](https://github.com/princeton-nlp/SWE-agent/assets/13602468/fa201621-ec31-4644-b658-c1d0feb92253)
-
-You can use SWE-agent either through a web interface (shown above) or through the command line.
-
-## 🚀 Get started!
-
-👉 Try SWE-agent in your browser: [![Open in GitHub Codespaces](https://img.shields.io/badge/Open_in_GitHub_Codespaces-gray?logo=github)](https://codespaces.new/princeton-nlp/SWE-agent) ([more information](https://princeton-nlp.github.io/SWE-agent/installation/codespaces/))
-
-Read our [documentation][docs] to learn more:
-
-* [Installation](https://princeton-nlp.github.io/SWE-agent/installation/)
-* [Command line usage](https://princeton-nlp.github.io/SWE-agent/usage/cl_tutorial/)
-* [Using the web UI](https://princeton-nlp.github.io/SWE-agent/usage/web_ui/)
-* [Benchmarking on SWE-bench](https://princeton-nlp.github.io/SWE-agent/usage/benchmarking/)
-* [Frequently Asked Questions](https://princeton-nlp.github.io/SWE-agent/faq/)
-
 <div align="center">
-<a href="https://princeton-nlp.github.io/SWE-agent/"><img src="assets/doc-scrot.png" style="width: 600px"/></a>
+ 👋 Hi, everyone! 
+    <br>
+    We are <b>ByteDance Seed team.</b>
 </div>
 
-[docs]: https://princeton-nlp.github.io/SWE-agent/
+<p align="center">
+  You can get to know us better through the following channels👇
+  <br>
+  <a href="https://team.doubao.com/">
+    <img src="https://img.shields.io/badge/Website-%231e37ff?style=for-the-badge&logo=bytedance&logoColor=white"></a>
+  <a href="https://github.com/user-attachments/assets/93481cda-a7f3-47f3-b333-fe6b3da86b78">
+    <img src="https://img.shields.io/badge/WeChat-07C160?style=for-the-badge&logo=wechat&logoColor=white"></a>
+ <a href="https://www.xiaohongshu.com/user/profile/668e7e15000000000303157d?xsec_token=ABl2-aqekpytY6A8TuxjrwnZskU-6BsMRE_ufQQaSAvjc%3D&xsec_source=pc_search">
+    <img src="https://img.shields.io/badge/Xiaohongshu-%23FF2442?style=for-the-badge&logo=xiaohongshu&logoColor=white"></a>
+  <a href="https://www.zhihu.com/org/dou-bao-da-mo-xing-tuan-dui/">
+    <img src="https://img.shields.io/badge/zhihu-%230084FF?style=for-the-badge&logo=zhihu&logoColor=white"></a>
+</p>
 
-## 💫 Contributions <a name="contributions"></a>
-- If you'd like to ask questions, learn about upcoming features, and participate in future development, join our [Discord community](https://discord.gg/AVEFbBn2rH)!
-- If you'd like to contribute to the codebase, we welcome [issues](https://github.com/princeton-nlp/SWE-agent/issues) and [pull requests](https://github.com/princeton-nlp/SWE-agent/pulls)!
+![seed logo](https://github.com/user-attachments/assets/c42e675e-497c-4508-8bb9-093ad4d1f216)
 
-Contact person: [John Yang](https://john-b-yang.github.io/) and [Carlos E. Jimenez](http://www.carlosejimenez.com/) (Email: {jy1682, carlosej}@princeton.edu).
+<!-- 注释：以上为Seed官方信息，可直接复制使用，请注意导入"Seed WeChat"（第12行）、"Seed logo"(第20行)图片替换 -->
 
-## 📝 Citation <a name="citation"></a>
-If you found this work helpful, please consider citing it using the following:
+
+## 🚀 MSWE-agent: Swe-agent for multi-swe-bench
+<p align="center">
+  <a href="https://github.com/multi-swe-bench/multi-swe-bench">
+    <img src="https://img.shields.io/badge/Multi_SWE_bench-Project Page-yellow"></a>
+  <a href="https://arxiv.org/pdf/2502.19811">
+    <img src="https://img.shields.io/badge/Multi_SWE_bench-Tech Report-red"></a>
+  <a href="https://huggingface.co/datasets/bytedance-research/Multi-SWE-Bench">
+    <img src="https://img.shields.io/badge/Multi_SWE_bench-Hugging Face-orange"></a>
+  <br>
+  <a href="https://huggingface.co/Multi-SWE-RL">
+    <img src="https://img.shields.io/badge/Multi_SWE_RL_Community-Hugging Face-EE9A12"></a>
+  <a href="https://discord.gg/EtfbkfqUuN">
+    <img src="https://img.shields.io/badge/Multi_SWE_RL_Community-Discord-1449DA"></a>
+  <a href="https://github.com/multi-swe-bench/multi-swe-bench/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/License-Apache-blue"></a>
+</p>
+
+We have modified the original [**Swe-agent**](https://github.com/SWE-agent/SWE-agent) (2024.07 version) compatible with [**Multi-SWE-Bench**](https://github.com/multi-swe-bench/multi-swe-bench)! MSwe-agent can be used to evaluate the performance of LLMs across 7 languages(c++, c, java, go, rust, typescript, javascript) in the [**Multi-SWE-Bench** dataset](https://huggingface.co/datasets/bytedance-research/Multi-SWE-Bench).
+
+<!-- 注释：以上为项目基础信息，以项目COMET举例，Comet一级标题（第25行）、徽章Comet名字（第28、30、32、34行）记得替换，徽章可按需使用
+请注意，徽章可根据具体项目自定义，如技术成果落地页、技术成果报告/Paper、Hugging Face、项目微信交流群、License、打榜榜单等，更换名字和链接即可；
+专属微信群出现在两个位置，第34行、第42行，可以联系EB同学创建 -->
+## To Start
+### 1. Install
+```bash
+conda env create -f environment.yml
+conda activate mswe-agent
 ```
-@misc{yang2024sweagent,
-      title={SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering},
-      author={John Yang and Carlos E. Jimenez and Alexander Wettig and Kilian Lieret and Shunyu Yao and Karthik Narasimhan and Ofir Press},
-      year={2024},
-      eprint={2405.15793},
-      archivePrefix={arXiv},
-      primaryClass={cs.SE}
+### 2. Download Dataset
+```bash
+sudo chmod +x preprocess_data.sh
+./preprocess_data.sh
+```
+
+### 3. Run
+configure the `keys.cfg` to make sure your OpenAI API key is set correctly.
+We provide two ways to run the agent on multi-swe-bench:
+#### 3.1 Run serially
+```bash
+python3 run.py \
+   --model_name gpt4o \
+   --cache_task_images True \
+   --per_instance_api_calls_limit 50 \
+   --pre_build_all_images True \ # if you want to build all the images, set it to True, otherwise build case after case
+   --remove_image False \ # if you want to remove the image after running, set it to True, otherwise keep it
+   --pr_file data/go_verified.jsonl \ # the language you want to run
+   --config_file config/default.yaml  --skip_existing=True \
+   --per_instance_cost_limit 5.00 \
+   --print_config=False \
+   --max_workers_build_image 16
+```
+
+#### 3.2 Run in parallel
+```bash
+export RUNNING_THREADS=30
+python3 multirun.py \
+   --model_name gpt4o \
+   --cache_task_images True \
+   --per_instance_api_calls_limit 50 \
+   --pre_build_all_images True \
+   --remove_image False \
+   --pr_file data/go.jsonl \
+   --config_file config/default.yaml  --skip_existing=True \
+   --per_instance_cost_limit 5.00 \
+   --print_config=False \
+   --max_workers_build_image 16
+```
+
+### Images
+We provide the images for each instance. You can use the following command to download the images directly from [our docker hub site](https://hub.docker.com/u/mswebench) rather than build them locally.
+
+## 📊 Evaluation
+after running the agent, all the predicted patches will be save in `trajactories` directory, named as `all_preds.jsonl`. And then you can evaluate in the [multi-swe-bench](https://github.com/multi-swe-bench/multi-swe-bench) repo
+
+### Run Evaluation
+
+To run the evaluation, you need to prepare the following:
+
+1. Patch Files: Some patch files in JSONL format, each item containing:
+   - `org`: Organization Name
+   - `repo`: Repository Name
+   - `number`: Pull Request Number
+   - `fix_patch`: Fix Patch Content
+2. Dataset Files: Dataset files in JSONL format available on Hugging Face, such as [Multi-SWE-Bench](https://huggingface.co/datasets/Multi-SWE-RL/Multi-SWE-Bench)
+
+Then you can run the evaluation using the following command:
+
+```bash
+cd multi-swe-bench
+python -m multi_swe_bench.harness.run_evaluation --config /path/to/your/config.json
+```
+
+#### Configuration File Example
+
+```json
+{
+    "mode": "evaluation",
+    "workdir": "./data/workdir",
+    "patch_files": [
+        "./data/patches/<your_patch_file>.jsonl"
+    ],
+    "dataset_files": [
+        "./data/patches/<to_evaluate_dataset_file>.jsonl"
+    ],
+    "force_build": false,
+    "output_dir": "./data/dataset",
+    "specifics": [],
+    "skips": [],
+    "repo_dir": "./data/repos",
+    "need_clone": false,
+    "global_env": [],
+    "clear_env": true,
+    "stop_on_error": true,
+    "max_workers": 8,
+    "max_workers_build_image": 8,
+    "max_workers_run_instance": 8,
+    "log_dir": "./data/logs",
+    "log_level": "DEBUG"
 }
 ```
 
-## 🪪 License <a name="license"></a>
-MIT. Check `LICENSE`.
+#### Configuration Parameters
 
-<div align="center">
+| Parameter | Description |
+|-----------|-------------|
+| `mode` | Execution mode for the script. Options: `"evaluation"`, `"instance"`, `"instance_only"`, `"image"`. Default: `"evaluation"` |
+| `workdir` | Working directory path for evaluation operations |
+| `patch_files` | List of patch file paths in JSONL format (supports glob patterns) |
+| `dataset_files` | List of dataset file paths in JSONL format (supports glob patterns) |
+| `force_build` | Whether to force rebuild Docker images even if they already exist |
+| `output_dir` | Directory path for output results |
+| `specifics` | List of specific PR IDs to evaluate (empty = all) |
+| `skips` | List of PR IDs to skip during evaluation |
+| `repo_dir` | Directory containing cloned repositories |
+| `need_clone` | Whether repositories should be cloned if not present |
+| `global_env` | Global environment variables to pass to Docker containers (format: `"KEY=VALUE"`) |
+| `clear_env` | Whether to clear environment variables in Docker containers |
+| `stop_on_error` | Whether to stop execution when an error occurs |
+| `max_workers` | Maximum number of concurrent worker threads for general tasks |
+| `max_workers_build_image` | Maximum number of concurrent worker threads for building Docker images |
+| `max_workers_run_instance` | Maximum number of concurrent worker threads for running instances |
+| `log_dir` | Directory for log files |
+| `log_level` | Logging level. Options: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, `"CRITICAL"` |
 
-[![Pytest](https://github.com/princeton-nlp/SWE-agent/actions/workflows/pytest.yaml/badge.svg)](https://github.com/princeton-nlp/SWE-agent/actions/workflows/pytest.yaml)
-[![Test build containers](https://github.com/princeton-nlp/SWE-agent/actions/workflows/test_build_containers.yaml/badge.svg)](https://github.com/princeton-nlp/SWE-agent/actions/workflows/test_build_containers.yaml)
-[![Release to dockerhub (nightly)](https://github.com/princeton-nlp/SWE-agent/actions/workflows/release-dockerhub-nightly.yaml/badge.svg)](https://github.com/princeton-nlp/SWE-agent/actions/workflows/release-dockerhub-nightly.yaml)
-[![Release to dockerhub (release)](https://github.com/princeton-nlp/SWE-agent/actions/workflows/release-dockerhub-release.yaml/badge.svg)](https://github.com/princeton-nlp/SWE-agent/actions/workflows/release-dockerhub-release.yaml)
-[![build-docs](https://github.com/princeton-nlp/SWE-agent/actions/workflows/build-docs.yaml/badge.svg)](https://github.com/princeton-nlp/SWE-agent/actions/workflows/build-docs.yaml)
-[![codecov](https://codecov.io/gh/princeton-nlp/SWE-agent/graph/badge.svg?token=18XAVDK365)](https://codecov.io/gh/princeton-nlp/SWE-agent)
-[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/princeton-nlp/SWE-agent/main.svg)](https://results.pre-commit.ci/latest/github/princeton-nlp/SWE-agent/main)
-[![Markdown links](https://github.com/princeton-nlp/SWE-agent/actions/workflows/check-links.yaml/badge.svg)](https://github.com/princeton-nlp/SWE-agent/actions/workflows/check-links.yaml)
+## 📜 License
+This project is licensed under Apache License 2.0. See the [LICENSE](/LICENSE) flie for details.
+## 📖 Citation
+If you find XXX useful for your research and applications, feel free to give us a star ⭐ or cite us using:
 
-</div>
+```bibtex
+@article{zan2024swe,
+  title={Swe-bench-java: A github issue resolving benchmark for java},
+  author={Zan, Daoguang and Huang, Zhirong and Yu, Ailun and Lin, Shaoxin and Shi, Yifan and Liu, Wei and Chen, Dong and Qi, Zongshuai and Yu, Hao and Yu, Lei and others},
+  journal={arXiv preprint arXiv:2408.14354},
+  year={2024}
+}
+```
+## 🏢 About [ByteDance Seed Team](https://team.doubao.com/)
+
+Founded in 2023, ByteDance Seed Team is dedicated to crafting the industry's most advanced AI foundation models. The team aspires to become a world-class research team and make significant contributions to the advancement of science and society.

@@ -39,6 +39,7 @@ from simple_parsing import parse
 from simple_parsing.helpers.flatten import FlattenedAccess
 from simple_parsing.helpers.serialization.serializable import FrozenSerializable
 from swebench import KEY_INSTANCE_ID, KEY_MODEL, KEY_PREDICTION
+from multi_swe_bench.harness.build_dataset import CliArgs
 from unidiff import PatchSet
 
 from sweagent.agent.agents import Agent, AgentArguments
@@ -112,7 +113,7 @@ class ScriptArguments(FlattenedAccess, FrozenSerializable):
     def run_name(self):
         """Generate a unique name for this run based on the arguments."""
         model_name = self.agent.model.model_name.replace(":", "-")
-        data_stem = get_data_path_name(self.environment.data_path)
+        data_stem = get_data_path_name(str(self.environment.cli_args.pr_file))
         assert self.agent.config_file is not None  # mypy
         config_stem = Path(self.agent.config_file).stem
 
@@ -173,12 +174,12 @@ class SaveApplyPatchHook(MainHook):
         self._apply_patch_locally = args.actions.apply_patch_locally
         self._instance = None
 
-    def on_instance_start(self, *, index: int, instance: dict[str, Any]):
+    def on_instance_start(self, *, index: int, instance):
         self._instance = instance
 
     def on_instance_completed(self, *, info, trajectory):
         assert self._instance is not None  # mypy
-        instance_id = self._instance["instance_id"]
+        instance_id = self._instance.data["instance_id"]
         patch_path = self._save_patch(instance_id, info)
         if patch_path:
             if not self._apply_patch_locally:
@@ -188,7 +189,7 @@ class SaveApplyPatchHook(MainHook):
             assert self._instance  # mypy
             if self._instance["repo_type"] != "local":
                 return
-            local_dir = Path(self._instance["repo"])
+            local_dir = Path(self._instance.instance.pr.repo)
             self._apply_patch(patch_path, local_dir)
 
     @staticmethod
@@ -309,14 +310,13 @@ class Main:
         if args.print_config:
             logger.info(f"📙 Arguments: {args.dumps_yaml()}")
         self.args = args
-        self.agent = Agent("primary", args.agent)
         self.env = SWEEnv(args.environment)
+        self.agent = Agent("primary", args.agent)
         self.traj_dir = Path("trajectories") / Path(getuser()) / args.run_name
         self.traj_dir.mkdir(parents=True, exist_ok=True)
         self._save_arguments()
         default_hooks = [
-            SaveApplyPatchHook(),
-            OpenPRHook(),
+            SaveApplyPatchHook()
         ]
         self.hooks: list[MainHook] = []
         for hook in default_hooks:
@@ -326,19 +326,18 @@ class Main:
         hook.on_init(args=self.args, agent=self.agent, env=self.env, traj_dir=self.traj_dir)
         self.hooks.append(hook)
 
-    def run(self, index):
+    def run(self, instance_id):
         # Reset environment
-        instance_id = self.env.data[index]["instance_id"]
         for hook in self.hooks:
-            hook.on_instance_start(index=index, instance=self.env.data[index])
+            hook.on_instance_start(index=0, instance=self.env.data[instance_id])
         assert isinstance(instance_id, str)  # mypy
         if self.should_skip(instance_id):
             for hook in self.hooks:
                 hook.on_instance_skipped()
             raise _ContinueLoop
-        logger.info("▶️  Beginning task " + str(index))
+        logger.info("▶️  Beginning task " + instance_id)
 
-        observation, info = self.env.reset(index)
+        observation, info = self.env.reset(instance_id)
         if info is None:
             raise _ContinueLoop
 
@@ -346,16 +345,16 @@ class Main:
         issue = getattr(self.env, "query", None)
         files = []
         assert self.env.record is not None  # mypy
-        if "patch" in self.env.record:
-            files = "\n".join([f"- {x.path}" for x in PatchSet(self.env.record["patch"]).modified_files])
+        if self.env.record.instance.pr.fix_patch:
+            files = "\n".join([f"- {x.path}" for x in PatchSet(self.env.record.instance.pr.fix_patch).modified_files])
         # Get test files, F2P tests information
         test_files = []
-        if "test_patch" in self.env.record:
-            test_patch_obj = PatchSet(self.env.record["test_patch"])
+        if self.env.record.instance.pr.test_patch:
+            test_patch_obj = PatchSet(self.env.record.instance.pr.test_patch)
             test_files = "\n".join([f"- {x.path}" for x in test_patch_obj.modified_files + test_patch_obj.added_files])
         tests = ""
-        if "FAIL_endTO_PASS" in self.env.record:
-            tests = "\n".join([f"- {x}" for x in self.env.record["FAIL_TO_PASS"]])
+        # if "FAIL_endTO_PASS" in self.env.record:
+        #     tests = "\n".join([f"- {x}" for x in self.env.record["FAIL_TO_PASS"]])
 
         setup_args = {"issue": issue, "files": files, "test_files": test_files, "tests": tests}
         info, trajectory = self.agent.run(
@@ -372,9 +371,9 @@ class Main:
     def main(self):
         for hook in self.hooks:
             hook.on_start()
-        for index in range(len(self.env.data)):
+        for instance_id in self.env.data.keys():
             try:
-                self.run(index)
+                self.run(instance_id)
             except _ContinueLoop:
                 continue
             except KeyboardInterrupt:
@@ -392,10 +391,10 @@ class Main:
                     self.env.close()
                     raise e
                 if self.env.record:
-                    logger.warning(f"❌ Failed on {self.env.record['instance_id']}: {e}")
+                    logger.warning(f"❌ Failed on {self.env.record.data['instance_id']}: {e}")
                 else:
                     logger.warning("❌ Failed on unknown instance")
-                self.env.reset_container()
+                self.env.close()
                 continue
         for hook in self.hooks:
             hook.on_end()
@@ -466,9 +465,16 @@ def get_args(args=None) -> ScriptArguments:
     defaults = ScriptArguments(
         suffix="",
         environment=EnvironmentArguments(
-            image_name="sweagent/swe-agent:latest",
-            data_path="princeton-nlp/SWE-bench_Lite",
-            split="dev",
+            cli_args= CliArgs(
+                workdir=Path("data_files"),
+                repo_dir=None,
+                pr_file='data/',
+                need_clone=True,
+                max_workers_build_image=64,
+                max_workers_run_instance=64,
+                clear_env=False,
+                global_env=[],
+            ),
             verbose=True,
             install_environment=True,
             cache_task_images=False,

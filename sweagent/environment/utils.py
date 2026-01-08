@@ -24,12 +24,27 @@ import docker
 from docker.models.containers import Container
 from sweagent.utils.config import keys_config
 from sweagent.utils.log import get_logger
+from multi_swe_bench.harness.build_dataset import prepare_datas, data_registry
+from multi_swe_bench.harness.instance import Record
+
+class NoOutputTimeoutError(TimeoutError): ...
 
 DOCKER_START_UP_DELAY = float(keys_config.get("SWE_AGENT_DOCKER_START_UP_DELAY", 1))
 GITHUB_ISSUE_URL_PATTERN = re.compile(r"github\.com\/(.*?)\/(.*?)\/issues\/(\d+)")
 GITHUB_REPO_URL_PATTERN = re.compile(r".*[/@]?github\.com\/([^/]+)\/([^/]+)")
 
+LANGUAGE_MAP = {
+    "java": ["java"],
+    "javascript": ["javascript", "js", "nodejs"],
+    "cpp": ["cpp", "c++"],
+    "c": ["c"],
+    "typescript": ["typescript", "ts"],
+    "go": ["go"],
+    "rust": ["rust"]
+}
+
 logger = get_logger("env_utils")
+
 
 
 def get_data_path_name(data_path: str) -> str:
@@ -160,7 +175,7 @@ def read_with_timeout(container: subprocess.Popen, pid_func: Callable, timeout_d
             time.sleep(0.05)
             continue
         if ready_to_read(fd):
-            data = os.read(fd, 4096)
+            data = os.read(fd, 8192)
             if data:
                 buffer += data
         else:
@@ -180,9 +195,24 @@ def read_with_timeout(container: subprocess.Popen, pid_func: Callable, timeout_d
 PROCESS_DONE_MARKER_START = "///PROCESS-DONE:"
 PROCESS_DONE_MARKER_END = ":PROCESS-DONE///"
 PROCESS_DONE_REGEX = re.compile(rf"{PROCESS_DONE_MARKER_START}(.+?){PROCESS_DONE_MARKER_END}")
+DECODED_BUFFER_FAILURE_THRESHOLD = 0.1
+
+def _check_for_too_many_non_unicode_bytes(buffer: bytes):
+    number_of_failures = int(DECODED_BUFFER_FAILURE_THRESHOLD * len(buffer))
+    start_byte = 0
+    for _ in range(number_of_failures):
+        try:
+            buffer[start_byte:].decode()
+            return
+        except UnicodeDecodeError as e:
+            start_byte = e.start + 1
+    msg = "Too many non-unicode characters in output of command."
+    raise UnicodeError(msg)
 
 
-def read_with_timeout_experimental(container: subprocess.Popen, timeout_duration: int) -> tuple[str, str]:
+def read_with_timeout_experimental(
+    container: subprocess.Popen, timeout_duration: int | float, no_output_timeout_duration: int | float
+) -> tuple[str, str]:
     """
     Read data from a subprocess with a timeout.
     This function uses a file descriptor to read data from the subprocess in a non-blocking way.
@@ -193,6 +223,7 @@ def read_with_timeout_experimental(container: subprocess.Popen, timeout_duration
     Args:
         container: The subprocess container.
         timeout_duration: The timeout duration in seconds.
+        no_output_timeout_duration: The timeout duration to wait if no output is produced, in seconds.
 
     Returns:
         Output and exit code, both as strings (!)
@@ -202,7 +233,9 @@ def read_with_timeout_experimental(container: subprocess.Popen, timeout_duration
     """
     buffer = b""
     fd = container.stdout.fileno()
-    end_time = time.time() + timeout_duration
+    start_time = time.time()
+    end_time = start_time + timeout_duration
+    end_time_no_output = start_time + no_output_timeout_duration
 
     # Select is not available on windows
     is_windows = platform.system() == "Windows"
@@ -217,33 +250,49 @@ def read_with_timeout_experimental(container: subprocess.Popen, timeout_duration
             return True
         return bool(select.select([fd], [], [], 0.01)[0])
 
-    while time.time() < end_time:
+    process_done = False
+
+    while time.time() < min(end_time, end_time_no_output):
         if ready_to_read(fd):
             try:
-                data = os.read(fd, 4096)
+                data = os.read(fd, 65536)
             except BlockingIOError:
+                logger.error("BlockingIOError while reading from subprocess.", exc_info=True)
                 break
             if data:
+                end_time_no_output = time.time() + no_output_timeout_duration
                 buffer += data
-        if PROCESS_DONE_MARKER_START in buffer.decode():
-            break
+                if PROCESS_DONE_MARKER_START in buffer.decode("utf-8", errors="backslashreplace").replace("\r\n", "\n"):
+                    process_done = True
+                    break
         time.sleep(0.01)  # Prevents CPU hogging
 
-    if container.poll() is not None:
-        msg = f"Subprocess exited unexpectedly.\nCurrent buffer: {buffer.decode()}"
-        raise RuntimeError(msg)
-    if time.time() >= end_time:
-        msg = f"Timeout reached while reading from subprocess.\nCurrent buffer: {buffer.decode()}"
-        raise TimeoutError(msg)
-    decoded = buffer.decode()
+    decoded = buffer.decode("utf-8", errors="backslashreplace").replace("\r\n", "\n")
     body = "\n".join(line for line in decoded.splitlines() if not line.startswith(PROCESS_DONE_MARKER_START))
-    last_line = decoded.splitlines()[-1]
-    _results = PROCESS_DONE_REGEX.search(last_line)
+
+    if container.poll() is not None:
+        msg = f"Subprocess exited unexpectedly.\nCurrent buffer: {decoded}"
+        raise RuntimeError(msg, body)
+
+    current_time = time.time()
+    if not process_done and current_time >= min(end_time, end_time_no_output):
+        if current_time >= end_time:
+            msg = f"Timeout reached while reading from subprocess.\nCurrent buffer: {decoded}"
+            raise TimeoutError(msg, body)
+        else:
+            msg = f"No output timeout reached while reading from subprocess.\nCurrent buffer: {decoded}"
+            raise NoOutputTimeoutError(msg, body)
+
+    _check_for_too_many_non_unicode_bytes(buffer=buffer)
+    for line in reversed(decoded.splitlines()):
+        _results = PROCESS_DONE_REGEX.search(line)
+        if _results is not None:
+            break
     if _results is None:
-        msg = f"Could not find process done marker in last line: {last_line=}, {body=}"
+        msg = f"Could not find process done marker in last line: {decoded=}, {body=}"
         raise ValueError(msg)
     exit_code = _results.group(1)
-    return body, exit_code
+    return body.replace(f"{PROCESS_DONE_MARKER_START}{exit_code}{PROCESS_DONE_MARKER_END}", ""), exit_code
 
 
 def get_background_pids(container_obj: Container):
@@ -265,7 +314,6 @@ def _get_non_persistent_container(ctr_name: str, image_name: str) -> tuple[subpr
         ctr_name,
         image_name,
         "/bin/bash",
-        "-l",
     ]
     logger.debug("Starting container with command: %s", shlex.join(startup_cmd))
     container = subprocess.Popen(
@@ -429,6 +477,19 @@ def image_exists(image_name: str) -> bool:
         )
     return True
 
+def remove_image(image_name: str) -> None:
+    """Remove an image from the local docker registry"""
+    client = docker.from_env()
+    filterred_images = client.images.list(filters={"reference": image_name})
+    if len(filterred_images) == 0:
+        logger.warning(f"Image {image_name} not found, skipping removal.")
+        return
+    elif len(filterred_images) > 1:
+        RuntimeError(f"Multiple images found for {image_name}, that's weird.")
+    image = filterred_images[0]
+    image.remove()
+    logger.info(f"Removed image {image_name}.")
+    
 
 def get_commit(api: GhApi, owner: str, repo: str, ref: str | None = None):
     """Get commit object from github api
@@ -507,13 +568,15 @@ def get_problem_statement_from_github_issue(owner: str, repo: str, issue_number:
 
 
 class InstanceBuilder:
-    def __init__(self, token: str | None = None):
+    def __init__(self, token: str | None = None, language: str | None = None):
         """This helper class is used to build the data for an instance object,
         retrieving problem statements from github issues or local files and setting
         repo paths from github urls or local paths.
         """
         # Args that will be passed to the Instance constructor
-        self.args = {}
+        self.args = {
+            "language": language
+        }
         self.token = token
         self._instance_id_problem_suffix = ""
 
@@ -601,6 +664,7 @@ class InstanceBuilder:
 
     def validate(self):
         required_fields = [
+            "language",
             "problem_statement",
             "instance_id",
             "repo",
@@ -628,12 +692,10 @@ class InstanceBuilder:
 
 def get_instances(
     file_path: str,
-    base_commit: str | None = None,
-    split: str | None = None,
-    token: str | None = None,
+    cli_args,
     *,
-    repo_path: str = "",
-) -> list[dict[str, Any]]:
+    prebuild: bool = False
+) -> dict[str, Record]:
     """
     Getter function for handling json, jsonl files
 
@@ -641,96 +703,23 @@ def get_instances(
         file_path (str): Path to file
 
     Returns:
-        List of instances as dictionaries
+        List of Instances
     """
+    lang = specify_languages(file_path)
+    instances = prepare_datas(file_path, cli_args, prebuild)
+    
 
-    def instance_from_dict(instances):
-        ib = InstanceBuilder(token=token)
-        ib.set_from_dict(instances)
-        return ib.build()
+    return {
+        k: Record(instances[k], lang, data_registry[k])
+        for k in instances.keys()
+    }
+    
 
-    def postproc_instance_list(instances):
-        if isinstance(instances, dict):
-            msg = "Expected a list of instances, got a dictionary."
-            raise ValueError(msg)
-        return [instance_from_dict(x) for x in instances]
-
-    # The next if statement is very brittle logic to determine if we're processing a single instance
-    if (
-        file_path.startswith("text://")
-        or (Path(file_path).is_file() and Path(file_path).suffix in [".md", ".txt"])
-        or is_github_issue_url(file_path)
-    ):
-        ib = InstanceBuilder(token=token)
-        ib.set_problem_statement(file_path)
-        if repo_path:
-            ib.set_repo_info(repo_path, base_commit=base_commit)
-        elif is_github_repo_url(file_path):
-            ib.set_repo_info_from_gh_url(file_path, base_commit=base_commit)
-        else:
-            msg = f"Could not determine repo path from {file_path=}, {repo_path=}"
-            raise ValueError(msg)
-
-        return [ib.build()]
-
-    if base_commit:
-        msg = "base_commit must be empty if running over multiple problem statements"
-        raise ValueError(msg)
-
-    if repo_path:
-        msg = "repo_path must be empty if running over multiple problem statements"
-        raise ValueError(msg)
-
-    # If file_path is a directory, attempt load from disk
-    if os.path.isdir(file_path):
-        try:
-            dataset_or_dict = load_from_disk(file_path)
-            if isinstance(dataset_or_dict, dict):
-                return postproc_instance_list(dataset_or_dict[split])
-            return postproc_instance_list(dataset_or_dict)
-        except FileNotFoundError:
-            # Raised by load_from_disk if the directory is not a dataset directory
-            pass
-
-    # The next if statement is very brittle logic to determine if we're processing a single instance
-    if (
-        (Path(file_path).is_file() and Path(file_path).suffix in [".md", ".txt"])
-        or is_github_issue_url(file_path)
-        or file_path.startswith("text://")
-    ):
-        ib = InstanceBuilder(token=token)
-        ib.set_problem_statement(file_path)
-        if repo_path:
-            ib.set_repo_info(repo_path, base_commit=base_commit)
-        elif is_github_repo_url(file_path):
-            ib.set_repo_info_from_gh_url(file_path)
-        else:
-            msg = f"Could not determine repo path from {file_path=}, {repo_path=}"
-            raise ValueError(msg)
-
-        return [ib.build()]
-
-    if base_commit is not None:
-        msg = "base_commit must be None if data_path is not a github issue url"
-        raise ValueError(msg)
-
-    # If file_path is a file, load the file
-    if file_path.endswith(".json"):
-        with open(file_path) as file:
-            return postproc_instance_list(json.load(file))
-    if file_path.endswith(".jsonl"):
-        return postproc_instance_list([json.loads(x) for x in Path(file_path).read_text().splitlines(keepends=True)])
-
-    # Attempt load from HF datasets as a last resort
-    try:
-        return postproc_instance_list(load_dataset(file_path, split=split))
-    except Exception as e:
-        msg = (
-            f"Could not load instances from {file_path}. "
-            "Please ensure --data_path is a GitHub URL, a SWE-bench HuggingFace dataset, or a JSON/JSONL file."
-        )
-        raise ValueError(msg) from e
-
+def specify_languages(file_path: str | Path):
+    for lang in LANGUAGE_MAP:
+        if any(f'{x}_' in str(file_path) for x in LANGUAGE_MAP[lang]) or any(f'{x}-' in str(file_path) for x in LANGUAGE_MAP[lang]):
+            return lang
+    return None
 
 def get_associated_commit_urls(org: str, repo: str, issue_number: str, *, token: str = "") -> list[str]:
     """Return the URLs of commits that would close an issue."""
@@ -791,3 +780,29 @@ def format_trajectory_markdown(trajectory: list[dict[str, str]]):
         "</details>",
     ]
     return "\n".join(prefix) + "\n\n---\n\n".join(steps) + "\n".join(suffix)
+
+
+def action_hacking(action: str) -> str:
+    '''
+    TODO: this is a hack, need some way to fix this in the long term.
+    due to some shell command may cause some problems.
+    '''
+    hacking_endstokens_commands = [
+        './gradlew'
+    ]
+    for cmd in hacking_endstokens_commands:
+        if cmd in action:
+            action = action.rstrip() + f'; echo {PROCESS_DONE_MARKER_START}$?{PROCESS_DONE_MARKER_END}\n'
+            break
+
+    hacking_npms_commands = [
+        'npm run',
+        'yarn run'
+    ]
+    for cmd in hacking_npms_commands:
+        # npm / yarn running is attached to the main process and get hanging, 
+        # with which running raw commands will get timeout or container killed.
+        if cmd in action:
+            action = f"(nohup  {action} & > /dev/null) && sleep 30 && cat /dev/null \n"
+            break
+    return action

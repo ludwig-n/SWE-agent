@@ -18,8 +18,9 @@ import yaml
 from ghapi.all import GhApi
 from git import Repo
 from simple_parsing.helpers.serialization.serializable import FrozenSerializable
-from swebench import MAP_VERSION_TO_INSTALL, get_environment_yml, get_requirements
-
+from simple_parsing.helpers.fields import field
+from multi_swe_bench.harness.instance import Instance, Record, Image
+from multi_swe_bench.harness.build_dataset import build_image, CliArgs
 import docker
 import docker.errors
 import docker.models.containers
@@ -35,14 +36,18 @@ from sweagent.environment.utils import (
     get_gh_issue_data,
     get_instances,
     image_exists,
+    remove_image,
     parse_gh_issue_url,
     read_with_timeout,
     read_with_timeout_experimental,
+    action_hacking
 )
 from sweagent.utils.config import keys_config
 from sweagent.utils.log import default_logger, get_logger
 
-LONG_TIMEOUT = 500
+LONG_TIMEOUT = float(keys_config.get("SWE_AGENT_ENV_LONG_TIMEOUT", 500))
+AGENT_ACTION_TIMEOUT = float(keys_config.get("SWE_AGENT_ACTION_TIMEOUT", 50))
+AGENT_ACTION_NO_OUTPUT_TIMEOUT = float(keys_config.get("SWE_AGENT_ACTION_NO_OUTPUT_TIMEOUT", AGENT_ACTION_TIMEOUT))
 PATH_TO_REQS = "/root/requirements.txt"
 PATH_TO_ENV_YML = "/root/environment.yml"
 
@@ -50,15 +55,8 @@ PATH_TO_ENV_YML = "/root/environment.yml"
 @dataclass(frozen=True)
 class EnvironmentArguments(FrozenSerializable):
     """Configure data sources and setup instructions for the environment in which we solve the tasks."""
-
-    # Source of issue statement/problem statement. To run over a batch of issues: Path to a data file
-    # (`json`, `jsonl`) or directory. To run over single issue: github issue url or path to markdown file
-    # with problem statement or problem statement as text prefixed with `text://`.
-    data_path: str
-    # Name of the docker image to use for the environment. Defaults to sweagent/swe-agent:latest
-    image_name: str = "sweagent/swe-agent:latest"
-    # When running over SWE-bench issues: Specify the split to use.
-    split: str = "dev"
+    # Specify the data meta info
+    cli_args: CliArgs
     # Specify a branch name or a commit hash to checkout before running the task.
     # Only used when running over a single problem statement/issue.
     base_commit: str | None = None
@@ -73,7 +71,7 @@ class EnvironmentArguments(FrozenSerializable):
     # Enable environment logger.
     verbose: bool = False
     # Do not use attempt to use a repository mirror from https://github.com/swe-bench.
-    no_mirror: bool = False
+    no_mirror: bool = True
     # Cache task images to speed up task initialization. This means that the environment will be saved as a
     # docker image for every repository, base commit, and setup combination. This uses quite a bit of disk space
     # but speeds up task initialization significantly when running over multiple issues from the same repository
@@ -86,6 +84,12 @@ class EnvironmentArguments(FrozenSerializable):
     environment_setup: str | None = None
     # Only used when running on single issue. Path to local repository or github repository.
     repo_path: str = ""
+     # whether to pre-build all images before running instances or build on the fly
+    pre_build_all_images: bool = False
+    # remove image after a instance is done
+    remove_image: bool = False
+
+
 
     def __post_init__(self):
         if self.timeout is not None:
@@ -134,15 +138,17 @@ class SWEEnv(gym.Env):
     # This prefix will be prepended to the image name when caching task images
     cached_image_prefix = "swe-agent-task-env-"
 
-    def __init__(self, args: EnvironmentArguments):
+    def __init__(self, args: EnvironmentArguments, log_dir: Path = None):
         super().__init__()
         t0 = time.perf_counter()
         self.args = args
+        self.prebuild = args.pre_build_all_images
+        self.remove_image = args.remove_image
         self.base_commit: str | None = None
         self.communicate_output: str | None = None
         self.container_name: str | None = args.container_name
         self.install_environment = args.install_environment
-        self.logger = get_logger("SWEEnv")
+        self.logger = get_logger("SWEEnv", log_dir)
         self.persistent = args.container_name is not None
         self.returncode: None | int = None
         if not self.args.verbose:
@@ -162,23 +168,21 @@ class SWEEnv(gym.Env):
         self._github_token: str = keys_config.get("GITHUB_TOKEN", "")  # type: ignore
 
         # Load Task Instances
-        self.data_path = self.args.data_path
+        self.data_path = self.args.cli_args.pr_file
         self.data = get_instances(
             self.data_path,
-            self.args.base_commit,
-            self.args.split,
-            token=self._github_token,
-            repo_path=self.args.repo_path,
+            cli_args=self.args.cli_args,
+            prebuild=self.prebuild
         )
         #: Instance we're currently processing. Gets set in self.reset.
-        self.record: dict[str, Any] | None = None
+        self.record: Record | None = None
         self.logger.info(f"💽 Loaded dataset from {self.data_path}")
 
         # Establish connection with execution container
-        self.image_name = args.image_name
+        self.image_name = None
         self.container_obj: docker.models.containers.Container | None = None
         self.container: subprocess.Popen | None = None
-        self._reset_container()
+        # self._reset_container()
 
         self.idx = 0
         self.clean_multi_line_functions = lambda x: x
@@ -189,8 +193,8 @@ class SWEEnv(gym.Env):
     def _get_cached_task_image_name(self) -> str:
         assert self.record is not None
         inputs: list[str] = [
-            self.record["repo"],
-            self.record["base_commit"],
+            self.record.instance.pr.repo,
+            self.record.instance.pr.base.sha,
             self.args.environment_setup or "no_setup",
         ]
         tag = hashlib.sha256("".join(inputs).encode()).hexdigest()[:50]
@@ -209,7 +213,7 @@ class SWEEnv(gym.Env):
     def _repo_name(self) -> str:
         """Name of the local copy of the repository"""
         assert self.record is not None
-        return self.record["repo"].replace("/", "__")
+        return self.record.instance.pr.repo
 
     def _copy_repo(self) -> str:
         """Clone/copy repository/codebase in container
@@ -219,30 +223,11 @@ class SWEEnv(gym.Env):
         """
         assert self.container_obj is not None
         assert self.record is not None  # mypy
-        for hook in self.hooks:
-            hook.on_copy_repo_started(repo_type=self.record["repo_type"], repo_path=self.record["repo"])
-        if self.record["repo_type"] == "local":
-            copy_anything_to_container(
-                self.container_obj,
-                self.record["repo"].removeprefix("local://"),
-                "/" + self._repo_name,
-            )
-            self.communicate_with_handling(
-                input=f"chown -R root:root {self._repo_name}",
-                error_msg="Failed to change permissions on copied repository",
-            )
-            return self._repo_name
-        assert self.record["repo_type"] == "github"
-        token_prefix = ""
         if self._github_token:
             token_prefix = f"{self._github_token}@"
         # fixme: This if statement is brittle and should probably be replaced with better logic
-        if not self.args.no_mirror and self.record["problem_statement_source"] == "swe-bench":
-            self.logger.info(f"{self._repo_name} not found in container, cloning...")
-            clone_url = f"https://{token_prefix}github.com/swe-bench/{self._repo_name}.git"
-        else:
-            self.logger.info("Trying to clone from non-mirror...")
-            clone_url = f"https://{token_prefix}github.com/{self.record['repo']}.git"
+        self.logger.info("Trying to clone from non-mirror...")
+        clone_url = f"https://{token_prefix}github.com/{self.record.instance.pr.repo}.git"
         clone_method = keys_config.get("SWE_AGENT_CLONE_METHOD", default="sparse", choices=["sparse", "full"])
         if len(self.data) > 1 or self.persistent:
             msg = "Falling back to full cloning method due to multiple instances or persistent container"
@@ -254,7 +239,7 @@ class SWEEnv(gym.Env):
                 timeout_duration=LONG_TIMEOUT,
             )
         else:
-            base_commit = self.record["base_commit"]
+            base_commit = self.record.instance.pr.base.sha
             self.communicate_with_handling(
                 input="&&".join(
                     (
@@ -272,7 +257,7 @@ class SWEEnv(gym.Env):
             )
         return self._repo_name
 
-    def reset(self, index: int | None = None, apply_test_patch: bool = False) -> tuple[str | None, dict]:
+    def reset(self, instance_id: str, apply_test_patch: bool = False) -> tuple[str | None, dict]:
         """
         Function to reset container between each task instance.
 
@@ -282,7 +267,7 @@ class SWEEnv(gym.Env):
         * Check out base commit
 
         Args:
-            index: index of task instance to reset to
+            instance_id
 
         Returns:
             observation: output from container
@@ -292,37 +277,24 @@ class SWEEnv(gym.Env):
         info["commit_sha"] = self.commit_sha
 
         # Get task instance
-        self.idx = index if index is not None else self.idx
-        self.record = self.data[self.idx]
-        self.idx += 1
+        self.record = self.data[instance_id]
 
         # Set query, gold command
-        self.base_commit = self.record["base_commit"]
-        self.query = self.record["problem_statement"]
+        self.base_commit = self.record.instance.pr.base.sha
+        self.query = 'TITLE:\n' + self.record.instance.pr.resolved_issues[0].title + '\n CONTENT:\n' + self.record.instance.pr.resolved_issues[0].body
         self.reward = None
 
-        ### Reset Container ###
+        # build images
+        if not self.prebuild:
+            self._build_image()
 
-        if self.args.cache_task_images:
-            cached_image = self._get_cached_task_image_name()
-            if image_exists(cached_image):
-                self.logger.info(f"Restore environment from cached image {cached_image}")
-                self.close()  # stop current container
-                self._init_container(cached_image=cached_image)
-                self.communicate("export $(xargs </.env)")
-                envs = self.communicate("env")
-                self.logger.debug(f"Environment variables restored from the image:\n{envs}\n")
-                if apply_test_patch:
-                    self._apply_test_patch()
-                return None, info
-            else:
-                self.logger.info(f"Cached image {cached_image} not found, rebuilding task environment...")
+        ### Reset Container ###
+        self._reset_container(instance_id)
 
         # Clone repository if not already cloned
-        self.communicate(input="cd /")
+        self.communicate(input="cd /home")
         folders = self.communicate(input="ls").split("\n")
-        if self._repo_name not in folders:
-            self._copy_repo()
+        assert self._repo_name in folders
 
         # Clean repository of any modifications + Checkout base commit
         for cmd in [
@@ -334,10 +306,33 @@ class SWEEnv(gym.Env):
             f"git reset --hard {self.base_commit}",
             "git clean -fdxq",
         ]:
-            self.communicate_with_handling(
+            log = self.communicate_with_handling(
                 input=cmd,
                 error_msg="Failed to clean repository",
+                except_error_msgs=['fatal', 'not a git command'],
+                timeout_duration=LONG_TIMEOUT,
             )
+
+        # pre-install dependencies for swe-agent ACI tools
+        for cmd in [
+            "apt-get update",
+            'apt-get install -y jq'
+        ]:
+            self.communicate_with_handling(
+                input=cmd,
+                error_msg="Failed to install",
+                timeout_duration=LONG_TIMEOUT,
+                no_output_timeout_duration=LONG_TIMEOUT
+            )
+
+        # update .gitignore files
+        source_file = Path(REPO_ROOT) / "multi_swe_bench" / "utils" / "gitignores"/ f"{self.record.language}.sh"
+        copy_anything_to_container(self.container_obj, str(source_file), "/home/ignore.sh")
+        self.communicate('chmod +x /home/ignore.sh')
+        self.communicate_with_handling(
+            input="bash ../ignore.sh",
+            error_msg="Failed to source ignore files"
+        )
 
         # Reset environment variables
         for cmd in [
@@ -352,37 +347,17 @@ class SWEEnv(gym.Env):
                 error_msg="Failed to reset environment variables",
             )
 
-        # Set up environment
-        self.communicate_with_handling(
-            "source /root/miniconda3/etc/profile.d/conda.sh",
-            error_msg="Failed to source conda",
-        )
-
         system = self.communicate("uname -s").strip().lower()
         arch = self.communicate("uname -m").strip().lower()
         if system == "linux" and arch == "x86_64":
             self.communicate_with_handling(
-                "apt update; apt install build-essential -y",
+                "apt update --allow-insecure-repositories ; apt install build-essential -y --allow-unauthenticated",
                 error_msg="Failed to install build-essential",
                 timeout_duration=LONG_TIMEOUT,
             )
 
-        # Call install environment helper function if specified
-        if self.install_environment:
-            self.install_env()
-        # Install mypy for linting purposes
-        self.communicate_with_handling("pip install flake8", error_msg="Failed to install flake8 (lint library)")
-
-        if self.args.cache_task_images:
-            envs = self.communicate("env")
-            self.logger.debug(f"Environment variables to save:\n{envs}\n")
-            self.communicate("env >> /.env")
-            assert self.container_obj is not None  # mypy
-            self.container_obj.commit(cached_image)
-            self.logger.info(f"Container with environment {self.container_obj.id} cached as image {cached_image}")
-
-        if apply_test_patch:
-            self._apply_test_patch()
+        # remove the fix.patch if it exists
+        self.communicate('rm /home/fix.patch')
         # Write any metadata to info if necessary
         return None, info
 
@@ -393,7 +368,7 @@ class SWEEnv(gym.Env):
         assert self.record is not None
         path_to_patch = "test.patch"
         with open(path_to_patch, "w") as f:
-            f.write(self.record["test_patch"])
+            f.write(self.record.instance.pr.test_patch)
         subprocess.run(
             f"docker cp {path_to_patch} {self.container_name}:/root/test.patch",
             shell=True,
@@ -428,7 +403,7 @@ class SWEEnv(gym.Env):
             return observation, 0, True, info
         if action in {"exit_context", "exit_cost", "exit_error", "exit_format", "exit_api"}:
             try:
-                observation = self.communicate(input="submit")
+                observation = self.communicate(input="submit", timeout_duration=AGENT_ACTION_TIMEOUT)
                 submission = self.get_submission(observation)
                 assert submission is not None and submission.strip() != "", AssertionError("No submission found.")
                 self.logger.info(f"Found submission: {submission}")
@@ -443,36 +418,53 @@ class SWEEnv(gym.Env):
                 observation = "Exited"
                 info["exit_status"] = action
                 return observation, 0, True, info
+            
+        # do action hacking
+        action = action_hacking(action)
 
         # Attempt to run action in container
         observation = ""
         try:
-            observation = self.communicate(input=action, timeout_duration=25)
-        except TimeoutError:
+            observation = self.communicate(
+                input=action, 
+                timeout_duration=LONG_TIMEOUT, 
+                no_output_timeout_duration=AGENT_ACTION_NO_OUTPUT_TIMEOUT
+            )
+        except TimeoutError as e:
             try:
-                self.interrupt()
+                observation += e.args[1] if len(e.args) > 1 else ""
+                observation += self.interrupt()
                 observation += "\nEXECUTION TIMED OUT"
+                observation += (
+                    f" BECAUSE NO OUTPUT WAS PRODUCED FOR MORE THAN 500 SECONDS.\nPLEASE REFINE YOUR RUNNING COMMAND SO IT WILL PRODUCE OUTPUT IN THE SPECIFIED TIME FRAME."
+                )
             except RuntimeError as e:
-                observation += "\nEXECUTION TIMED OUT AND INTERRUPT FAILED. RESTARTING PROCESS."
+                observation += e.args[1] if len(e.args) > 1 else ""
+                observation += "\nEXECUTION TIMED OUT AND INTERRUPT FAILED."
                 info["exit_status"] = "early_exit"
-                self.logger.warning(f"Failed to interrupt container: {e}\nRESTARTING PROCESS.")
-                self.reset_container()
+                self.logger.warning(f"Failed to interrupt container: {e}\n")
+                self.close()
                 return observation, 0, True, info
         except RuntimeError as e:
-            observation += "\nCOMMAND FAILED TO EXECUTE. RESTARTING PROCESS."
+            observation += "\nCOMMAND FAILED TO EXECUTE."
             info["exit_status"] = "early_exit"
-            self.logger.warning(f"Failed to execute command: {e}\nRESTARTING PROCESS.")
-            self.reset_container()
+            self.logger.warning(f"Failed to execute command: {e}\n.")
+            self.close()
             return observation, 0, True, info
         except BrokenPipeError as e:
-            observation += "\nBROKEN PIPE ERROR. RESTARTING PROCESS."
+            observation += "\nBROKEN PIPE ERROR."
             info["exit_status"] = "early_exit"
-            self.logger.error(f"Broken pipe error: {e}\nRESTARTING PROCESS.")
-            self.reset_container()
+            self.logger.error(f"Broken pipe error: {e}\n")
+            self.close()
             return observation, 0, True, info
         except Exception:
             observation += "\nEXECUTION FAILED OR COMMAND MALFORMED"
             self.logger.exception("Unknown exception")
+
+        # truncate observation, in case some test information is too large
+        if len(observation) > 40000:
+            observation = observation[:20000] + "..." + observation[-20000:]
+
 
         # Record submission and end episode if `submit` keyword found
         submission = self.get_submission(observation)
@@ -529,7 +521,18 @@ class SWEEnv(gym.Env):
 
     # MARK: Helper functions #
 
-    def _reset_container(self) -> None:
+    def _build_image(self) -> None:
+        instance = self.record.instance
+        self.logger.info(f"Building image for {instance.name()}")
+        build_image(
+            instance.dependency(),
+            cli=self.args.cli_args,
+            logger=self.logger
+        )
+        
+
+
+    def _reset_container(self, instance_id) -> None:
         if self.container is not None:
             try:
                 self.container.terminate()
@@ -539,14 +542,15 @@ class SWEEnv(gym.Env):
                 self.logger.warning("Failed to terminate container", exc_info=True)
             else:
                 self.logger.debug("Terminated container")
-        self._init_container()
+        image_full_name = self.record.instance.name()
+        self._init_container(image_full_name)
         self._init_scripts()
 
-    def reset_container(self) -> None:
+    def reset_container(self, instance_id) -> None:
         self.close()
         self.container = None
         self.container_obj = None
-        self._reset_container()
+        self._reset_container(instance_id)
 
     @staticmethod
     def _get_container_name(image_name: str) -> str:
@@ -607,10 +611,6 @@ class SWEEnv(gym.Env):
         Initialize custom commands within container
         """
         self.communicate_with_handling(
-            "source /root/.bashrc",
-            error_msg="Failed to source .bashrc",
-        )
-        self.communicate_with_handling(
             "mkdir -p /root/commands",
             error_msg="Failed to create commands directory",
         )
@@ -627,6 +627,7 @@ class SWEEnv(gym.Env):
         self,
         input: str,
         timeout_duration=25,
+        no_output_timeout_duration: int | float = 25,
     ) -> str:
         """Experimental version of `_communicate`"""
         assert self.container is not None
@@ -644,7 +645,7 @@ class SWEEnv(gym.Env):
             msg = "Failed to communicate with container"
             raise RuntimeError(msg)
 
-        buffer, exit_code = read_with_timeout_experimental(self.container, timeout_duration)
+        buffer, exit_code = read_with_timeout_experimental(self.container, timeout_duration, no_output_timeout_duration)
         self.returncode = int(exit_code)
         return buffer
 
@@ -652,13 +653,14 @@ class SWEEnv(gym.Env):
         self,
         input: str,
         timeout_duration=25,
+        no_output_timeout_duration: int | float = 25,
     ) -> str:
         assert self.container is not None
         communicate_method = keys_config.get(
             "SWE_AGENT_COMMUNICATE_METHOD", default="end-marker", choices=["end-marker", "processes"]
         )
         if communicate_method == "end-marker":
-            return self._communicate_experimental(input, timeout_duration)
+            return self._communicate_experimental(input, timeout_duration, no_output_timeout_duration)
         try:
             self.returncode = None
             cmd = input if input.endswith("\n") else input + "\n"
@@ -696,6 +698,7 @@ class SWEEnv(gym.Env):
         self,
         input: str,
         timeout_duration=25,
+        no_output_timeout_duration: int | float | None = 25,
     ) -> str:
         """
         Sends input to container and returns output
@@ -713,6 +716,7 @@ class SWEEnv(gym.Env):
             output = self._communicate(
                 input,
                 timeout_duration=timeout_duration,
+                no_output_timeout_duration=no_output_timeout_duration
             )
             self.communicate_output = output
             return output
@@ -722,7 +726,7 @@ class SWEEnv(gym.Env):
             self.communicate_output = ""
             return ""
 
-    def communicate_with_handling(self, input: str, error_msg: str, timeout_duration=25) -> str:
+    def communicate_with_handling(self, input: str, error_msg: str, timeout_duration=25, no_output_timeout_duration= 25, except_error_msgs = []) -> str:
         """
         Wrapper for communicate function that raises error if return code is non-zero
 
@@ -734,8 +738,11 @@ class SWEEnv(gym.Env):
         Returns:
             output: output from container
         """
-        logs = self.communicate(input, timeout_duration=timeout_duration)
+        logs = self.communicate(input, timeout_duration=timeout_duration, no_output_timeout_duration=no_output_timeout_duration)
         if self.returncode != 0:
+            if any( caught_err in logs for caught_err in except_error_msgs):
+                self.logger.warning(f'the error message is in exception, some adjustmens will be acted to the commands.')
+                return logs
             self.logger.error(f"{error_msg}: {logs}")
             self.close()
             msg = f"{error_msg}: {logs}"
@@ -755,7 +762,7 @@ class SWEEnv(gym.Env):
         Gets list of processes running inside docker container
 
         Args:
-            all_pids: whether to return all pids, or whether to exclude ps
+            all_pids: whether to return all pids, or whether to exclude the main-process attached pid,
                 and parent PIDs
 
         Returns:
@@ -764,7 +771,7 @@ class SWEEnv(gym.Env):
         pids = self.container_obj.exec_run("ps -eo pid,comm --no-headers").output.decode().split("\n")
         pids = [x.split() for x in pids if x]
         if not all_pids:
-            pids = [x for x in pids if x[1] != "ps" and x[0] not in self.parent_pids]
+            pids = [x for x in pids if x[1] not in ["ps", 'npm', 'yarn', 'sh'] and x[0] not in self.parent_pids]
         return pids
 
     def get_submission(self, output: str) -> str:
@@ -838,164 +845,11 @@ class SWEEnv(gym.Env):
                 msg = "Environment config file needs to be a yaml file or shell script"
                 raise ValueError(msg)
         else:
-            try:
-                return MAP_VERSION_TO_INSTALL[self.record["repo"]][str(self.record["version"])]
-            except KeyError as e:
-                msg = (
-                    "Tried to look up install configs in swe-bench, but failed. "
-                    "You can set a custom environment config with the environment_config key/flag."
-                )
-                raise ValueError(msg) from e
+            return None
 
     def _conda_environment_exists(self, env_name: str) -> bool:
         env_check = self.communicate(f"conda env list | grep {env_name}", timeout_duration=LONG_TIMEOUT)
         return env_check.strip() != ""
-
-    def install_env(self) -> None:
-        """
-        Creates conda environment and installs third party dependencies to allow code execution
-        """
-        t0 = time.perf_counter()
-        for hook in self.hooks:
-            hook.on_install_env_started()
-        install_configs = self._get_install_configs()
-        if not install_configs:
-            return
-        if "shell_script_path" in install_configs:
-            assert len(install_configs) == 1
-            self.run_shell_script(Path(install_configs["shell_script_path"]), location="host")
-            return
-        assert self.record is not None  # mypy
-        # Create environment if does not exist yet
-        env_name = f"{self._repo_name}__{self.record['version']}"
-        if not self._conda_environment_exists(env_name):
-            self.logger.info(f"{env_name} conda env not found, creating...")
-            packages = install_configs.get("packages", "")
-            if packages == "requirements.txt":
-                # Create conda environment
-                self.communicate_with_handling(
-                    f"conda create -n {env_name} python={install_configs['python']} -y",
-                    error_msg="Failed to create conda environment",
-                    timeout_duration=LONG_TIMEOUT,
-                )
-                self.logger.debug("Created conda environment")
-                # Write reqs to requirements.txt in docker container
-                content_reqs = get_requirements(self.record)
-                copy_file_to_container(self.container_obj, content_reqs, PATH_TO_REQS)
-                # Create conda environment + install reqs
-                self.communicate_with_handling(
-                    f"conda activate {env_name}",
-                    error_msg="Failed to activate conda environment",
-                )
-                self.communicate_with_handling(
-                    f"pip install -r {PATH_TO_REQS}",
-                    error_msg="Failed to install requirements.txt",
-                    timeout_duration=LONG_TIMEOUT,
-                )
-                self.logger.debug("Installed requirements from requirements.txt")
-                self.communicate(f"rm {PATH_TO_REQS}")
-            elif packages == "environment.yml":
-                # Write environment.yml to file
-                if install_configs.get("no_use_env"):
-                    content_env_yml = get_environment_yml(self.record, env_name)
-                else:
-                    content_env_yml = get_environment_yml(
-                        self.record,
-                        env_name,
-                        python_version=install_configs["python"],
-                    )
-                copy_file_to_container(self.container_obj, content_env_yml, PATH_TO_ENV_YML)
-                if install_configs.get("no_use_env"):
-                    # Create conda environment
-                    self.communicate_with_handling(
-                        f"conda create -c conda-forge -n {env_name} python={install_configs['python']} -y",
-                        error_msg="Failed to create conda environment",
-                        timeout_duration=LONG_TIMEOUT,
-                    )
-                    self.logger.debug("Created conda environment")
-                    # Install packages
-                    self.communicate_with_handling(
-                        f"conda env update -f {PATH_TO_ENV_YML}",
-                        error_msg="Failed to install environment.yml",
-                        timeout_duration=LONG_TIMEOUT,
-                    )
-                    self.logger.debug("Installed packages from environment.yml")
-                else:
-                    # Create environment + install packages
-                    self.communicate_with_handling(
-                        f"conda env create --file {PATH_TO_ENV_YML}",
-                        error_msg="Failed to create conda environment with environment.yml",
-                        timeout_duration=LONG_TIMEOUT,
-                    )
-                    self.logger.debug("Created conda environment with environment.yml")
-                self.communicate(f"rm {PATH_TO_ENV_YML}")
-            else:
-                python_env = f"python{install_configs['python']}"
-                if self._conda_environment_exists(python_env):
-                    self.communicate_with_handling(
-                        f"conda create --name {env_name} --clone {python_env}",
-                        error_msg="Failed to clone conda environment",
-                        timeout_duration=LONG_TIMEOUT,
-                    )
-                    self.logger.debug("Cloned python conda environment")
-                else:
-                    self.logger.debug(f"Could not find {python_env}, creating new environment")
-                    self.communicate_with_handling(
-                        f"conda create -n {env_name} python={install_configs['python']} -y",
-                        error_msg="Failed to create conda environment",
-                        timeout_duration=LONG_TIMEOUT,
-                    )
-                self.communicate_with_handling(
-                    f"conda activate {env_name}",
-                    error_msg="Failed to activate conda environment",
-                )
-                if packages.strip():
-                    self.communicate_with_handling(
-                        f"conda install {packages} -y",
-                        error_msg="Failed to install packages",
-                        timeout_duration=LONG_TIMEOUT,
-                    )
-                    self.logger.debug("Installed conda packages")
-            # Install extra pip packages if specified
-            if install_configs.get("pip_packages"):
-                self.communicate_with_handling(
-                    f"source activate {env_name} && pip install {' '.join(install_configs['pip_packages'])}",
-                    error_msg="Failed to install pip packages",
-                    timeout_duration=LONG_TIMEOUT,
-                )
-                self.logger.debug("Installed extra pip dependencies")
-
-        # Activate environment
-        self.communicate_with_handling(f"conda activate {env_name}", error_msg="Failed to activate conda environment")
-
-        # Install repo at base commit
-        if install_configs.get("pre_install"):
-            self.logger.info("Running pre-install commands...")
-            for pre_install_cmd in install_configs["pre_install"]:
-                self.communicate_with_handling(
-                    pre_install_cmd,
-                    error_msg="Pre-install commands failed to execute successfully",
-                )
-            self.logger.debug("Ran pre-install commands")
-        self.logger.info(f"Installing {self._repo_name} at base commit...")
-        if install_configs.get("install"):
-            install_cmd = install_configs["install"]
-            self.communicate_with_handling(
-                install_cmd,
-                error_msg="Install command failed to execute successfully",
-                timeout_duration=LONG_TIMEOUT,
-            )
-            self.logger.debug("Ran install command")
-        if install_configs.get("post_install"):
-            self.logger.info("Running post-install commands...")
-            for post_install_cmd in install_configs["post_install"]:
-                self.communicate_with_handling(
-                    post_install_cmd,
-                    error_msg="Post-install commands failed to execute successfully",
-                )
-            self.logger.debug("Ran post-install commands")
-
-        self.logger.info("Installation step took %.2f seconds", time.perf_counter() - t0)
 
     def add_commands(self, commands: list[dict]) -> None:
         """
@@ -1032,19 +886,33 @@ class SWEEnv(gym.Env):
         assert self.container is not None
         assert self.container_obj is not None
         pids = self.get_pids()
-        for pid, cmd in pids:
-            if pid not in self.parent_pids and cmd != "ps":
-                self.container_obj.exec_run(f"kill -9 {pid}")
+        for p in reversed(pids):
+            # We need to avoid to kill the main process which is in the small pid
+            pid = p[0]
+            self.container_obj.exec_run(f"kill -9 {pid}")
+        observation = ""
         try:
-            _ = read_with_timeout(self.container, self.get_pids, 20)
+            observation += read_with_timeout(self.container, self.get_pids, 20)
         except TimeoutError:
             pass
         try:
+            # This is a workaround because of bash behaviour
+            # when sometimes we get the prints of Killed after we press some "Enter" in stdin
+            self.communicate(input="echo 'interrupted'", timeout_duration=5)
             output = self.communicate(input="echo 'interrupted'", timeout_duration=5)
             assert output.strip().endswith("interrupted"), "container health check failed"
         except TimeoutError:
             msg = "Failed to interrupt container"
             raise RuntimeError(msg)
+        return observation
+        
+    def on_run_done(self):
+        self.close()
+        if self.remove_image:
+            image_name: str = self.record.instance.dependency().image_full_name()
+            self.logger.info(f"Removing image of {image_name}")
+            remove_image(image_name)
+
 
     def open_pr(self, *, trajectory, _dry_run: bool = False):
         """Create PR to repository

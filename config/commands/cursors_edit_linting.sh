@@ -37,7 +37,7 @@ edit() {
     printf "%s\n" "${new_lines[@]}" >| "$CURRENT_FILE"
     # Run linter
     if [[ $CURRENT_FILE == *.py ]]; then
-        lint_output=$(flake8 --isolated --select=F821,F822,F831,E111,E112,E113,E999,E902 "$CURRENT_FILE" 2>&1)
+        lint_output=$(flake8 --isolated --select=F821,F822,F831,E111,E112,E113,E999,E902 --ignore=E226,E241,E402,E731,F821,F822,F823,F831,F841,F999,F405 "$CURRENT_FILE" 2>&1)
     else
         # do nothing
         lint_output=""

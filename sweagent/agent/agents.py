@@ -10,6 +10,7 @@ from simple_parsing.helpers.fields import field
 from simple_parsing.helpers.flatten import FlattenedAccess
 from simple_parsing.helpers.serialization.serializable import FrozenSerializable
 from tenacity import RetryError
+import time
 
 from sweagent.agent.commands import Command, ParseCommand
 from sweagent.agent.history_processors import HistoryProcessor
@@ -89,6 +90,8 @@ class AgentConfig(FrozenSerializable):
         "emacs",
         "nano",
     )
+    language_specified_demo: dict[str, str] = field(default_factory=dict)
+    language_specified_tools: dict[str, str] = field(default_factory=dict)
     # Should extract environment state in a json readable form
     state_command: Command = Command(
         name="state",
@@ -239,7 +242,7 @@ class AgentHook:
 class Agent:
     """Agent handles the behaviour of the model and how it interacts with the environment."""
 
-    def __init__(self, name: str, args: AgentArguments):
+    def __init__(self, name: str, args: AgentArguments, log_dir: Path = None):
         self.name = name
         self.model = get_model(args.model, args.config._commands + args.config.subroutine_types)
         self.config = args.config
@@ -253,7 +256,7 @@ class Agent:
         self.history = []
         self.last_container_id = None
         self.hooks = []
-        self.logger = get_logger("agent")
+        self.logger = get_logger("agent", log_dir)
 
     def add_hook(self, hook: AgentHook):
         """Add hook to agent"""
@@ -471,20 +474,21 @@ class Agent:
         self.subroutine_patterns[self.config.submit_command] = submit_pat
         self.command_patterns[self.config.submit_command] = submit_pat
 
-    def forward(self, observation: str, available_actions: list[str], state: str) -> tuple[str, str, str]:
+    def forward(self, observation: str, available_actions: list[str], state: str, lang: str) -> tuple[str, str, str]:
         """Forwards the model
 
         Args:
             observation: Observation
             available_actions: Currently not used
             state:
+            language: Current case language
 
         Returns:
             thought: model reasoning
             action: action that the model proposes
             output: raw model output
         """
-        thought, action, output = self.forward_with_error_check(observation, state)
+        thought, action, output = self.forward_with_error_check(observation, state, lang)
 
         self._append_history(
             {
@@ -501,7 +505,7 @@ class Agent:
 
         return thought, action, output
 
-    def forward_model(self, observation: str, state: str) -> str:
+    def forward_model(self, observation: str, state: str, lang: str) -> str:
         """Query the model with the current state and observation with the appropriate template.
 
         Returns:
@@ -534,6 +538,9 @@ class Agent:
                     **self.system_args,
                     **state_vars,
                     observation=(observation if observation is not None else ""),
+                    language=lang,
+                    language_specified_script=self.config.language_specified_demo[lang],
+                    language_specified_tools=self.config.language_specified_tools[lang]
                 ),
             )
 
@@ -632,7 +639,7 @@ class Agent:
         self.logger.warning(f"Malformat limit reached: \n{output}")
         return "Exit due to format error", "exit_format", output
 
-    def forward_with_error_check(self, observation: str, state: str) -> tuple[str, str, str]:
+    def forward_with_error_check(self, observation: str, state: str, lang: str) -> tuple[str, str, str]:
         """Wrapper around `self.forward_model` that handles errors and retries
         due to format errors or blocked actions.
 
@@ -642,7 +649,8 @@ class Agent:
             output: raw model output
         """
         try:
-            output = self.forward_model(observation, state)
+            output = self.forward_model(observation, state, lang)
+            return self.check_format_and_requery(output)
         except KeyboardInterrupt:
             raise
         except RuntimeError as e:
@@ -665,7 +673,6 @@ class Agent:
                 "exit_api",
                 f"exit due to retry error: {e}",
             )
-        return self.check_format_and_requery(output)
 
     def init_environment_vars(self, env: SWEEnv):
         self.set_environment_vars(env, self.config.env_variables)
@@ -803,13 +810,21 @@ class Agent:
         # Run action/observation loop
         trajectory = []
         info = {}
-        traj_log_path = traj_dir / (env.record["instance_id"] + ".traj")
+        traj_log_path = traj_dir / (env.record.data['instance_id'] + ".traj")
         self.logger.info("Trajectory will be saved to %s", traj_log_path)
         while not done:
             for hook in self.hooks:
                 hook.on_step_start()
             state = env.communicate(self.state_command) if self.state_command else None
-            thought, action, output = self.forward(observation, env.get_available_actions(), state)
+            while True:
+                try:
+                    json.loads(state)
+                    break
+                except json.JSONDecodeError:
+                    self.logger.warning("last step output still in the pipe, retrying..")
+                    time.sleep(0.05)
+                state = env.communicate(self.state_command) if self.state_command else None
+            thought, action, output = self.forward(observation, env.get_available_actions(), state, env.record.language)
             for hook in self.hooks:
                 hook.on_actions_generated(thought=thought, action=action, output=output)
             observations = list()
@@ -852,6 +867,8 @@ class Agent:
 
         for hook in self.hooks:
             hook.on_run_done()
+
+        env.on_run_done()
 
         self.logger.info("Trajectory saved to %s", traj_log_path)
 

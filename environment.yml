@@ -1,4 +1,4 @@
-name: swe-agent
+name: mswe-agent
 dependencies:
   - python=3.9
   - pip

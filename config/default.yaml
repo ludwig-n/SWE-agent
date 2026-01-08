@@ -27,7 +27,7 @@ system_template: |-
   You're free to use any other bash commands you want (e.g. find, grep, cat, ls, cd) in addition to the special commands listed above.
   However, the environment does NOT support interactive session commands (e.g. python, vim), so please do not invoke them.
 instance_template: |-
-  We're currently solving the following issue within our repository. Here's the issue text:
+  We're currently solving the following issue within our repository of {language}. Here's the issue text:
   ISSUE:
   {issue}
 
@@ -35,7 +35,9 @@ instance_template: |-
   Now, you're going to solve this issue on your own. Your terminal session has started and you're in the repository's root directory. You can use any bash commands or the special interface to help you. Edit all the files you need to and run any checks or tests that you want.
   Remember, YOU CAN ONLY ENTER ONE COMMAND AT A TIME. You should always wait for feedback after every command.
   When you're satisfied with all of the changes you've made, you can submit your changes to the code base by simply running the submit command.
-  Note however that you cannot use any interactive session commands (e.g. python, vim) in this environment, but you can write scripts and run them. E.g. you can write a python script and then run it with `python <script_name>.py`.
+  Note however that you cannot use any interactive session commands (e.g. python, vim) in this environment, but you can write scripts and run them. E.g. you can write a script and then run it with `{language_specified_script}`.
+  
+  Tools of {language}: {language_specified_tools} could be used directly. 
 
   NOTE ABOUT THE EDIT COMMAND: Indentation really matters! When editing a file, make sure to insert appropriate indentation before each line!
 
@@ -73,12 +75,29 @@ next_step_no_output_template: |-
   (Current directory: {working_dir})
   bash-$
 demonstration_template: |
-  Here is a demonstration of how to correctly accomplish this task.
+  Here is a python repo demonstration of how to correctly accomplish this task.
   It is included to show you how to correctly use the interface.
+  Note: The real issue you solve will be another repo with language other than python.
   You do not need to follow exactly what is done in the demonstration.
   --- DEMONSTRATION ---
   {demonstration}
   --- END OF DEMONSTRATION ---
+language_specified_demo:
+  java: javac <script_file>.java && java <script_file>
+  cpp: g++ <script_file>.cpp -o <script_file> && ./<script_file>
+  c: gcc <script_file>.c -o <script_file> && ./<script_file>
+  javascript: node <script_file>.js
+  typescript: tsc <script_file>.ts && node <script_file>.js
+  go: go run <script_file>.go
+  rust: rustc <script_file>.rs && ./<script_file>
+language_specified_tools:
+  java: javac, maven(or ./mvnw), gradle(or ./gradlew)
+  cpp: g++, cmake, make
+  c: gcc, cmake, make
+  javascript: node, npm, yarn
+  typescript: node, npm, yarn
+  go: go
+  rust: rustc, cargo
 state_command:
   name: state
   code: |
@@ -106,5 +125,6 @@ command_files:
 - config/commands/_split_string.py
 parse_command: ParseCommandDetailed
 history_processor: Last5Observations
+put_demos_in_history: true
 demonstrations:
 - trajectories/demonstrations/replay__marshmallow-code__marshmallow-1867__default_sys-env_window100__t-0.20__p-0.95__c-2.00__install-1/marshmallow-code__marshmallow-1867.traj

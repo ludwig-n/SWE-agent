@@ -2,7 +2,7 @@ _print() {
     local total_lines=$(awk 'END {print NR}' $CURRENT_FILE)
     echo "[File: $(realpath $CURRENT_FILE) ($total_lines lines total)]"
     lines_above=$(jq -n "$CURRENT_LINE - $WINDOW/2" | jq '[0, .] | max | floor')
-    lines_below=$(jq -n "$total_lines - $CURRENT_LINE - $WINDOW/2" | jq '[0, .] | max | round')
+    lines_below=$(jq -n "$total_lines - $CURRENT_LINE - $WINDOW/2" | jq '[0, .] | max | floor')
     if [ $lines_above -gt 0 ]; then
         echo "($lines_above more lines above)"
     fi
@@ -10,6 +10,15 @@ _print() {
     if [ $lines_below -gt 0 ]; then
         echo "($lines_below more lines below)"
     fi
+}
+
+_rm_binaries(){
+    for file in $(git status --porcelain | grep -E "^(M| M|\?\?|A| A)" | cut -c4-); do
+        if [ -f "$file" ] && (file "$file" | grep -q "executable" || git check-attr binary "$file" | grep -q "binary: set"); then
+            git rm -f "$file" 2>/dev/null || rm -f "$file"
+            echo "Removed: $file"
+        fi
+    done
 }
 
 _constrain_line() {
@@ -136,7 +145,7 @@ scroll_down() {
 
 # @yaml
 # signature: scroll_up
-# docstring: moves the window down {WINDOW} lines
+# docstring: moves the window up {WINDOW} lines
 scroll_up() {
     if [ -z "$CURRENT_FILE" ]
     then
@@ -188,6 +197,8 @@ submit() {
     fi
 
     git add -A
+    # rm binaries files
+    _rm_binaries
     git diff --cached > model.patch
     echo "<<SUBMISSION||"
     cat model.patch
