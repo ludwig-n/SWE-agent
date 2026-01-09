@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-/root/python3.11/bin/python3 -m pip install flask requests playwright
-/root/python3.11/bin/python3 -m playwright install-deps chromium
+# pip install flask requests playwright
+/root/SWE-agent/venv/bin/python -m playwright install-deps chromium
 
 if [ -f /usr/bin/google-chrome ]; then
     export WEB_BROWSER_CHROMIUM_EXECUTABLE_PATH=/usr/bin/google-chrome
@@ -10,7 +10,7 @@ elif [ -f /usr/bin/chromium ]; then
 elif [ -f /usr/bin/google-chrome-stable ]; then
     export WEB_BROWSER_CHROMIUM_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 else
-    /root/python3.11/bin/python3 -m playwright install chromium
+    /root/SWE-agent/venv/bin/python -m playwright install chromium
 fi
 
 export WEB_BROWSER_SCREENSHOT_MODE=print

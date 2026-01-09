@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/root/SWE-agent/venv/bin/python
 
 from windowed_file import WindowedFile  # type: ignore
 
