@@ -10,7 +10,7 @@
 
 # Any changes to the .gitignore file itself, including ones made by the above script, are ignored in the patch.
 
-if [ -d /root/SWE-agent/sweagent/scripts/gitignores/${INSTANCE_LANGUAGE}.sh ]
+if [ -f /root/SWE-agent/sweagent/scripts/gitignores/${INSTANCE_LANGUAGE}.sh ]; then
     /root/SWE-agent/sweagent/scripts/gitignores/${INSTANCE_LANGUAGE}.sh
 else
     echo "No gitignore script found for language '${INSTANCE_LANGUAGE}'. Skipping gitignore script."
