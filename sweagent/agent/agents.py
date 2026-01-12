@@ -599,7 +599,12 @@ class DefaultAgent(AbstractAgent):
         self.info["swe_rex_hash"] = get_rex_commit_hash()
         assert self._env is not None
         assert self._problem_statement is not None
-        self._env.set_env_variables({"PROBLEM_STATEMENT": self._problem_statement.get_problem_statement_for_env()})
+        self._env.set_env_variables(
+            {
+                "PROBLEM_STATEMENT": self._problem_statement.get_problem_statement_for_env(),
+                "INSTANCE_LANGUAGE": self._problem_statement.get_extra_fields().get("language", "unknown"),
+            }
+        )
         self.add_system_message_to_history()
         self.add_demonstrations_to_history()
         self.add_instance_template_to_history(state=self.tools.get_state(self._env))
