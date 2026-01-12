@@ -8,7 +8,7 @@ main() {
     fi
 
     git add -A
-    git diff --cached > /root/model.patch
+    /root/SWE-agent/sweagent/scripts/get_patch.sh /root/model.patch
     echo "<<SWE_AGENT_SUBMISSION>>"
     cat /root/model.patch
     echo "<<SWE_AGENT_SUBMISSION>>"
