@@ -589,21 +589,37 @@ class DefaultAgent(AbstractAgent):
         self.traj_path = output_dir / (self._problem_statement.id + ".traj")
         self.logger.info("Trajectory will be saved to %s", self.traj_path)
 
+        print(1)
         self._chook.on_tools_installation_started()
+        print(2)
         self.tools.install(self._env)
+        print(3)
         self._chook.on_setup_attempt()
+        print(4)
         self.info = AgentInfo()
+        print(5)
         self.info["swe_agent_hash"] = get_agent_commit_hash()
+        print(6)
         self.info["swe_agent_version"] = __version__
+        print(7)
         self.info["swe_rex_version"] = get_rex_version()
+        print(8)
         self.info["swe_rex_hash"] = get_rex_commit_hash()
+        print(9)
         assert self._env is not None
+        print(10)
         assert self._problem_statement is not None
+        print(11)
         self._env.set_env_variables({"PROBLEM_STATEMENT": self._problem_statement.get_problem_statement_for_env()})
+        print(12)
         self.add_system_message_to_history()
+        print(13)
         self.add_demonstrations_to_history()
+        print(14)
         self.add_instance_template_to_history(state=self.tools.get_state(self._env))
+        print(15)
         self._chook.on_setup_done()
+        print(16)
 
     def add_system_message_to_history(self) -> None:
         """Add system message to history"""
