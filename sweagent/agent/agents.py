@@ -700,6 +700,7 @@ class DefaultAgent(AbstractAgent):
             **kwargs: keyword arguments to be passed to the templates (in addition to the
                 ones in `self._get_format_dict`)
         """
+        print("START _add_templated_messages_to_history")
         messages = []
 
         format_dict = self._get_format_dict(**kwargs)
@@ -714,7 +715,9 @@ class DefaultAgent(AbstractAgent):
 
         # We disable syntax highlighting here, because some inputs can lead to a complete cross-thread
         # freeze in the agent. See https://github.com/SWE-agent/SWE-agent/issues/901 .
+        print("directly before model input log")
         self.logger.info(f"🤖 MODEL INPUT\n{message}", extra={"highlighter": None})
+        print("directly after model input log")
         history_item: dict[str, Any] = {
             "role": "user",
             "content": message,
@@ -765,6 +768,7 @@ class DefaultAgent(AbstractAgent):
         """Add observation to history, as well as the instance template or demonstrations if we're
         at the start of a new attempt.
         """
+        print("START add_instance_template_to_history")
         templates: list[str] = []
         # Determine observation template based on what prior observation was
         assert self.history[-1]["role"] == "system" or self.history[-1].get("is_demo", False)
