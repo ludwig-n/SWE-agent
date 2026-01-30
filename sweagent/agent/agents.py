@@ -589,37 +589,37 @@ class DefaultAgent(AbstractAgent):
         self.traj_path = output_dir / (self._problem_statement.id + ".traj")
         self.logger.info("Trajectory will be saved to %s", self.traj_path)
 
-        print(1)
+        print(1, flush=True)
         self._chook.on_tools_installation_started()
-        print(2)
+        print(2, flush=True)
         self.tools.install(self._env)
-        print(3)
+        print(3, flush=True)
         self._chook.on_setup_attempt()
-        print(4)
+        print(4, flush=True)
         self.info = AgentInfo()
-        print(5)
+        print(5, flush=True)
         self.info["swe_agent_hash"] = get_agent_commit_hash()
-        print(6)
+        print(6, flush=True)
         self.info["swe_agent_version"] = __version__
-        print(7)
+        print(7, flush=True)
         self.info["swe_rex_version"] = get_rex_version()
-        print(8)
+        print(8, flush=True)
         self.info["swe_rex_hash"] = get_rex_commit_hash()
-        print(9)
+        print(9, flush=True)
         assert self._env is not None
-        print(10)
+        print(10, flush=True)
         assert self._problem_statement is not None
-        print(11)
+        print(11, flush=True)
         self._env.set_env_variables({"PROBLEM_STATEMENT": self._problem_statement.get_problem_statement_for_env()})
-        print(12)
+        print(12, flush=True)
         self.add_system_message_to_history()
-        print(13)
+        print(13, flush=True)
         self.add_demonstrations_to_history()
-        print(14)
+        print(14, flush=True)
         self.add_instance_template_to_history(state=self.tools.get_state(self._env))
-        print(15)
+        print(15, flush=True)
         self._chook.on_setup_done()
-        print(16)
+        print(16, flush=True)
 
     def add_system_message_to_history(self) -> None:
         """Add system message to history"""
@@ -700,7 +700,7 @@ class DefaultAgent(AbstractAgent):
             **kwargs: keyword arguments to be passed to the templates (in addition to the
                 ones in `self._get_format_dict`)
         """
-        print("START _add_templated_messages_to_history")
+        print("START _add_templated_messages_to_history", flush=True)
         messages = []
 
         format_dict = self._get_format_dict(**kwargs)
@@ -715,9 +715,9 @@ class DefaultAgent(AbstractAgent):
 
         # We disable syntax highlighting here, because some inputs can lead to a complete cross-thread
         # freeze in the agent. See https://github.com/SWE-agent/SWE-agent/issues/901 .
-        print("directly before model input log")
+        print("directly before model input log", flush=True)
         self.logger.info(f"🤖 MODEL INPUT\n{message}", extra={"highlighter": None})
-        print("directly after model input log")
+        print("directly after model input log", flush=True)
         history_item: dict[str, Any] = {
             "role": "user",
             "content": message,
@@ -768,7 +768,7 @@ class DefaultAgent(AbstractAgent):
         """Add observation to history, as well as the instance template or demonstrations if we're
         at the start of a new attempt.
         """
-        print("START add_instance_template_to_history")
+        print("START add_instance_template_to_history", flush=True)
         templates: list[str] = []
         # Determine observation template based on what prior observation was
         assert self.history[-1]["role"] == "system" or self.history[-1].get("is_demo", False)

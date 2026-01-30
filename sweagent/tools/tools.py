@@ -345,6 +345,7 @@ class ToolHandler:
             env.communicate(state_command, check="warn")
         combined_state = self._get_state(env)
         self.logger.debug(f"Retrieved state from environment: {combined_state}")
+        print("END OF get_state", flush=True)
         return combined_state
 
     # Blocking
