@@ -107,13 +107,17 @@ class RunBatchProgressManager:
     def update_instance_status(self, instance_id: str, message: str):
         assert self._task_progress_bar is not None
         assert self._main_progress_bar is not None
+        print("BEFORE self._lock")
         with self._lock:
+            print("INSIDE self._lock")
             self._task_progress_bar.update(
                 self._spinner_tasks[instance_id],
                 status=_shorten_str(message, 30),
                 instance_id=_shorten_str(instance_id, 25, shorten_left=True),
             )
+        print("OUTSIDE self._lock")
         self._update_total_costs()
+        print("AFTER _update_total_costs")
 
     def on_instance_start(self, instance_id: str):
         with self._lock:
