@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import shlex
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -149,6 +149,20 @@ class SWEEnv:
     def _reset_repository(self) -> None:
         """Clean repository of any modifications + Checkout base commit"""
         if self.repo is not None:
+            # If a git repository is not present, initialize one
+            if not Path(f"/{self.repo.repo_name}/.git").exists():
+                output = self.communicate(
+                    input="git init && git add -A && git commit -m 'Initial commit' && git rev-parse HEAD",
+                    check="raise",
+                    error_msg="Failed to initialize repository",
+                    timeout=120,
+                )
+
+                # The last command (git rev-parse HEAD) will print the initial commit SHA. Set it as base_commit
+                base_commit = output.split()[-1]
+                self.repo.base_commit = base_commit
+                self.logger.info(f"Git repository initialized in folder /{self.repo.repo_name}. Base commit: {base_commit}")
+
             self.logger.debug("Resetting repository %s to commit %s", self.repo.repo_name, self.repo.base_commit)
             # todo: Currently has swe-ft specific change: The original repo.copy isn't called, because the repo is already
             # present. However, reset --hard <BRANCH> also doesn't work. So modified it here to do a checkout instead.
