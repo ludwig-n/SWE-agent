@@ -154,7 +154,7 @@ class SWEEnv:
             # - If the repo is already initialized, `git init` will be a no-op. Simply create a new commit and get its SHA.
             if not self.repo.base_commit or self.repo.base_commit == "None":
                 output = self.communicate(
-                    input="git init && git add -A && git commit --allow-empty -m 'Base commit' && git rev-parse HEAD",
+                    input=f"cd /{self.repo.repo_name} && git init && git add -A && git commit --allow-empty -m 'Base commit' && git rev-parse HEAD",
                     check="raise",
                     error_msg="Failed to initialize repository",
                     timeout=120,
