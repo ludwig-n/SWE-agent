@@ -32,7 +32,7 @@ def _get_git_reset_commands(base_commit: str) -> list[str]:
     return [
         "git fetch",
         "git status",
-        "git restore .",
+        "git checkout -- .",  # equivalent to "git restore ." but works on old versions of git
         "git reset --hard",
         f"git checkout {shlex.quote(base_commit)}",
         "git clean -fdq",
