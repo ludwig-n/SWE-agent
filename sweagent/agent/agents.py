@@ -771,6 +771,7 @@ class DefaultAgent(AbstractAgent):
                 "trajectory": self.trajectory,
                 "history": self.history,
                 "info": self.info,
+                "tools": self.model.tools.tools,
             }
         )
         attempt_data["replay_config"] = self.replay_config.model_dump_json() if self.replay_config is not None else None
