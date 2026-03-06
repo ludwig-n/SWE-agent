@@ -23,6 +23,12 @@ SWE-agent enables your language model of choice (e.g. GPT-4o or Claude Sonnet 4)
 
 SWE-agent is built and maintained by researchers from Princeton University and Stanford University.
 
+> [!note]
+> Most of our current development effort is on [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent/),
+> which will eventually supersede SWE-agent. It already matches the performance performance of SWE-agent, while being
+> much simpler.
+> See the [FAQ](https://mini-swe-agent.com/latest/faq/) about whether you should switch already.
+
 ## 📣 News
 
 * July 24: [Mini-SWE-Agent](https://github.com/SWE-agent/mini-SWE-agent) achieves 65% on SWE-bench verified in 100 lines of python!

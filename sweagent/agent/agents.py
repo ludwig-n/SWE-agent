@@ -728,6 +728,7 @@ class DefaultAgent(AbstractAgent):
                 "tool_calls": step.tool_calls,
                 "message_type": "action",
                 "thinking_blocks": step.thinking_blocks,
+                "reasoning_content": step.reasoning_content,
             },
         )
 
@@ -775,6 +776,7 @@ class DefaultAgent(AbstractAgent):
                 "trajectory": self.trajectory,
                 "history": self.history,
                 "info": self.info,
+                "tools": self.model.tools.tools,
             }
         )
         attempt_data["replay_config"] = self.replay_config.model_dump_json() if self.replay_config is not None else None
@@ -1049,6 +1051,7 @@ class DefaultAgent(AbstractAgent):
             # todo: Can't I override the parser in __init__?
             step.thought, step.action = self.tools.parse_actions(output)
             step.thinking_blocks = output.get("thinking_blocks", [])
+            step.reasoning_content = output.get("reasoning_content")
             if output.get("tool_calls") is not None:
                 step.tool_call_ids = [call["id"] for call in output["tool_calls"]]
                 step.tool_calls = output["tool_calls"]
