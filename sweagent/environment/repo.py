@@ -30,7 +30,6 @@ class Repo(Protocol):
 
 def _get_git_reset_commands(base_commit: str) -> list[str]:
     return [
-        "git fetch",
         "git status",
         "git checkout -- .",  # equivalent to "git restore ." but works on old versions of git
         "git reset --hard",
